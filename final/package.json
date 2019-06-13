@@ -1,0 +1,29 @@
+{
+  "name": "final",
+  "version": "1.0.0",
+  "license": "MIT",
+  "idyll": {
+    "theme": "default",
+    "layout": "centered",
+    "css": "styles.css",
+    "authorView": false
+  },
+  "dependencies": {
+    "@psychobolt/react-paperjs": "0.0.56",
+    "d3": "^5.9.0",
+    "d3-color": "^1.2.3",
+    "d3-interpolate": "^1.3.2",
+    "d3-queue": "^3.1.0",
+    "d3-scale": "^3.0.0",
+    "d3-scale-chromatic": "^1.3.3",
+    "idyll": "^4.0.0",
+    "idyll-d3-component": "^2.0.0",
+    "paper": "^0.12.1",
+    "react-paper-bindings": "^2.0.0",
+    "react-paperjs": "^1.0.1",
+    "topojson": "^3.0.2"
+  },
+  "devDependencies": {
+    "gh-pages": "^0.12.0"
+  }
+}

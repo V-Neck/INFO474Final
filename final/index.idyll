@@ -1,0 +1,289 @@
+[meta title:"Record Linkage of Fatal Force Data" 
+  description:"This project seeks to complile and link heterogenous crowdsourced data on fatal police deaths." /]
+
+[Header
+  fullWidth:true
+  title:"Record Linkage of Fatal Force Data"
+  subtitle:"Combining crowd sourced data to better understand deaths from police"
+  author:"Vaughn Johnson"
+  date:`(new Date()).toDateString()`
+  background:"#dddddd"
+  color:"#ff4545"
+   /]
+
+# Context
+
+[data name:"victim_data"      source:"smol.csv" /]
+[data name:"fips_to_state"    source:"fips_to_state.json" /]
+[data name:"police_shootings" source:"police_shootings.csv"/]
+[data name:"state_pops"       source:"state_pops.csv" /]
+[data name:"state_to_fips"    source:"state_to_fips.json" /]
+[data name:"abv_to_state"     source:"states_hash.json" /]
+[data name:"us"               source:"us.json"/]
+
+
+Every year hundreds of people are shot and killed by the people entrusted to protect them. 
+As of 2019-06-09, **394 people** have been killed by the police in the United States.
+There is no official reporting done by the government to keep track of police violence, and
+by extension there is no central repository for data surrounding these deaths. That data 
+is crucial both in better understanding police violence and in holding the police accountable
+for using fatal force.
+
+However, as is so often the case, communities have come together in the face of 
+oppression to crowdsource data on these deaths. There are several compiled sources, but my
+reserach has focused primarily on 4 datasets
+
+* [Killed By Police](killedbypolice.net)
+* [The Washington Post's Police Shooting Database](https://www.washingtonpost.com/graphics/2019/national/police-shootings-2019/)
+* [Mapping Police Violence](https://mappingpoliceviolence.org/)
+* [Fatal Encounters](https://fatalencounters.org/)
+
+Fatal Encounters has data dating back to 2000, 
+while the other repositories only have data going back to 2013 (and in the case of WaPo, only 2015). 
+Killed By Police and Fatal Encounters are orignal datasets, whereas WaPo and Mapping Police Violence are 
+both derivative datasets that contribute additional information. In total, the combined data sources 
+have around **35K** records.
+
+Each of these datasets contains slightly different pieces of information. Some of the data is missing in
+some datasets while present in others. What we would like to do is combine these datasets together 
+such that we can infer any missing values (such as race), and enrich the total amount of information we 
+have on each victim.
+
+Unfortunately, stitching these datasets together is non-trivial; the datasets have inconsistent naming 
+and formatting conventions, there are typos and missing data, and people will sometimes appear in 
+some but not all of the datasets. What we need is a more general approach to merging records that
+can handle more inconsistent data.
+
+# Record Linkage
+
+There is in fact already such a method: **Record Linkage**.
+
+A record is a row in a table which points to a particular entity such as a medical patient, or a victim of police violence. 
+Record Linkage was developed in the 1960's as a solution to the problem of matching patients to 
+their medical and insurance records. In 1969, Ivan Fellegi and Alan Sunter published an 
+approach to Record Linkage that has proven to be so effective it is still the modern prototype
+for how Record Linkage is done today. Their general idea goes like this:
+
+1. Enumerate all the possible pairs of records across the datasets you want to combine
+2. Quantify some measure of distance between each pair
+3. Use some mathematical magic to assign a weight to each pair to corresponds to the probability they are matched
+4. Based on that weight, classify each pair as *matching*, *non-matching*, and *indeterminant*.
+
+Each step lots of details and caveats that I'll go into details below. 
+
+## 1) Enumerate pairs
+The first step is to find all the possible pairs of records. The Fellegi & Sunter method 
+is very general, and doesn't care if you are pulling records from two different datasets  
+or the same dataset, so long as the datasets have some rows in common. Therefore, not only 
+can we find if a person is present in more than one dataset, but also if that person
+appears in the same dataset twice! 
+
+
+The solution is to limit which pairs we actually consider. For example, it is almost never the 
+case that two records which are true matches will have two disctinct values for year. Therefore,
+when we enumerate all the possible pairs, we can immediately reject those pairs which do not already
+match on year. This method is called blocking, and dramatically reduces the number of pairs we need
+to consider. For the fatal force datasets, I blocked the data on year and US state, which reduced
+the number of pairs by a factor of 600.
+
+
+Below we have two sets of records we're trying to match. You can select different radio buttons
+to see how blocking reduces the number of pairs we have to consider.
+
+[Radio value:radioVal options:`["none", "year", "state", "sex", "race"]`  /]
+
+[CustomD3Component police:victim_data
+                   fips_to_state:fips_to_state
+                   state_pops:state_pops
+                   zbv_to_state:abv_to_state 
+                   state_to_fips:state_to_fips
+                   blockVal:radioVal /]
+
+Now, as you can see, as the number of records we're considering grows, the number of
+possible pairs grows *really* fast. If you have any experience with algorithms, you're likely already worried about the 
+combinatoric nature of this step. Given that we have around 35K records, that means 
+there are around 600M pairs that we have to consider. What's worse is that the "mathematical magic"
+we'll use to assign each pair a weight involves iterating over every pair several times,
+not to mention this dataset is growing nearly every day.
+
+
+## 2) Quantify Distance
+After Step 1 we now have a list of every possible pair. Each record in each pair will have
+a set of values (e.g. `name`, `race`, etc.). Our goal is to quantify some idea of distance for 
+each field in each pair. For example, say we have
+
+[var name:"idx" value:0 /]
+
+[button onClick:`idx = Math.floor(14 * Math.random())`]
+New Pair
+[/button]
+
+[var name:"pair" value:`"police"`/]
+
+[pairOfRecords pair:victim_data idx:idx/]
+
+Each column refers to a different type of data, and we need to be conscious of how we compare
+different data types. In the case of an integer like `year`, we can just take the actual difference 
+of the two values
+
+
+[diffedRecords data:victim_data idx:idx diffCols:`['year']`/]
+
+
+For data types like strings, there are other methods for comparing distance such as [Levenshtein](https://en.wikipedia.org/wiki/Levenshtein_distance)
+and [Jaro–Winkler](https://en.wikipedia.org/wiki/Jaro%E2%80%93Winkler_distance)
+
+
+For factors like sex where there isn't a sensible idea of being *distant* other than being simply *different*, we assign `true` for identical and 
+`false` for non-identical values
+
+[diffedRecords data:victim_data idx:idx diffCols:`['year', 'sex']`/]
+
+We can perform this process for each column of each pair. The end result would look something like this
+
+[diffedRecords data:victim_data idx:idx diffCols:`['year', 'sex', 'race', 'firstname', 'lastname', 'state']`/]
+
+We can think of a particular pair's set of comparison values as a vector
+
+Fellegi & Sunter refer to this vector as [equation display:false]\gamma[/equation], and that's also how I'll refer to it for the remainder of a document.
+
+## 3) Assign Weights
+Once we have a [equation display:false]\gamma[/equation] for each pair of records, we want to assign weight to each pair based on how likely we think that
+that particular pair is a match. The way Fellegi and Sunter go about doing this is by making use of two functions
+
+[equation display:true]
+  m(\gamma) = P(\gamma | \mathrm{match})
+[/equation]
+[equation display:true]
+  u(\gamma) = P(\gamma | \mathrm{nonmatch})
+[/equation]
+
+If you're unfamiliar with the notation,
+it reads "m of 
+[equation display:false] \gamma [/equation] 
+is the probability of observing 
+[equation display:false] \gamma [/equation] 
+given the pair is a match",
+and of course "u of 
+[equation display:false] \gamma [/equation] 
+is the probability of observing 
+[equation display:false]\gamma[/equation] 
+given the pair is a nonmatch". For the time being, don't worry how we get these values (I'll get to it).
+
+For each pair we can plug in [equation display:false]\gamma[/equation] 
+and get an [equation display:false]m[/equation] 
+and a [equation display:false]u[/equation].
+Fellegi & Sunter generate a single weight [equation display:false]w[/equation] 
+by dividing [equation display:false]m[/equation] 
+by [equation display:false]u[/equation], 
+and for mathematical convience, we can also take the log.
+[equation display:true]
+  w(\gamma) = \log(\frac{m(\gamma)}{u(\gamma)}) = \log(m(\gamma)) - \log(u(\gamma))
+[/equation]
+This assigns high weights to pairs have the two properties that
+
+1. Likely to occur given they are a match
+2. Unlikely to occur if not a match
+
+
+The way we actually estimate [equation display:false]m[/equation] 
+and [equation display:false]u[/equation] 
+is somewhat complicated, bordering on the side of magic. In order to figure out [equation display:false]m[/equation] 
+and [equation display:false]u[/equation] 
+we would simply count how often we find each [equation display:false]\gamma[/equation] 
+in a pair that is actually matched and divide by the total number of times we observe [equation display:false]\gamma[/equation],
+and that tells us [equation display:false]m[/equation], 
+(similarly for [equation display:false]u[/equation]
+). However, obviously we don't know which records are true matches before we perform Record Linkage! 
+We have a seemingly intractable chicken and egg problem.
+
+The solution is quite clever. The way statisticians usually start with problems like this is by finding 
+a liklihood, or the probability of observing the particular set of observations we have. Once we have a likelihood function, we  
+can take its derivate with respect to [equation display:false]m[/equation]
+and to [equation display:false]u[/equation] 
+and find the forms of [equation display:false]m[/equation] and 
+[equation display:false]u[/equation] 
+that maximize the likelihood. Unfortunately, the liklihood is also a function of whether each pair is a match,
+which is something we don't know a priori. The solution is to guess the latent variable, and find the 
+liklihood of that guess.
+We can then take the derivative, find the maximizing values of [equation display:false]m[/equation] and 
+[equation display:false]u[/equation], 
+and find some estimates of [equation display:false]m[/equation] 
+and [equation display:false]u[/equation].
+
+We can then take those new estimates and make new guesses about the latent matching variable. By iteratating this 
+process, our values of [equation display:false]m[/equation] 
+and [equation display:false]u[/equation] 
+converge.
+
+## 4
+Once we have a weight for each pair, we can line up each pair in order of its weight. 
+This creates a distribution:
+
+We can then segment the pairs into three categories based on their weight: `match`, `nonmatch`, and `indeterminant`.
+The way we draw the line between `match`, `nonmatch`, and `indeterminant` is based on the sum of [equation display:false]m[/equation] 
+and [equation display:false]u[/equation] 
+in each bucket.
+
+By resticting the sum of [equation display:false]u[/equation] in the `match`
+category and the sum [equation display:false]m[/equation] 
+in the `nonmatch` bucket, we effectively limit the number of 
+false positives and false negatives we make.
+
+# Results
+I was able to effectively link and merge the four datasets. The results are below
+
+[var name:"year" value:`2015`/]
+[var name:"race" value:`"All"`/]
+[var name:"sex"  value:`"All"`/]
+
+
+[Aside]
+  [Range value:year min:2010 max:2016 /][Display value:year /]
+  [Radio value:sex options:`["All", "Male", "Female", "Other / NA"]` /][Display value:sex/]
+  [Radio value:race options:`["All", "White", "Black", "Asian", "Hispanic", "Other / NA" ]` /][Display value:race/]
+[/Aside]
+
+**Year**
+[Display value:`Math.round(year)` /]
+[bar dimension:`"year"`
+     shootings:police_shootings 
+     year:year
+     race:race
+     sex:sex/]
+
+**Race**
+[Display value:race/]
+
+[bar dimension:`"race"`
+     shootings:police_shootings 
+     year:year
+     race:race
+     sex:sex /]
+
+**Sex**
+[Display value:sex/]
+
+[bar dimension:`"sex"`
+     shootings:police_shootings 
+     year:year
+     race:race
+     sex:sex /]
+
+## Fatal Police Encounters Per 100,000 People
+[choropleth us:us
+            shootings:police_shootings
+            state_pops:state_pops
+            abv_to_state:abv_to_state
+            fips_to_state:fips_to_state
+            state_to_fips:state_to_fips
+            year:year
+            race:race
+            sex:sex  /]
+
+[Aside]
+  (Duplicated for you convenience)
+  [Range value:year min:2010 max:2016 /][Display value:year /]
+  [Radio value:sex options:`["All", "Male", "Female", "Other / NA"]` /][Display value:sex/]
+  [Radio value:race options:`["All", "White", "Black", "Asian", "Other / NA" ]` /][Display value:race/]
+[/Aside]
